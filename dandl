@@ -1,0 +1,61 @@
+#!/usr/bin/env php
+<?php
+// Download images from a Danbooru-style site
+// For now it just echos URLs, use it with tee and wget to actually download
+
+// TODO: support reading from a conf file to specify output directory, etc.
+
+$me = array_shift($argv);
+$provider = array_shift($argv);
+$tags = implode(' ', $argv);
+
+switch ($provider) {
+	case 'r34':
+	case 'rule34.paheal.net':
+		// https://rule34.paheal.net/rss/images/%TAGS%/%PAGE%
+		$base = 'https://rule34.paheal.net/rss/images/';
+		$pg = 1;
+		$max = 1;
+
+		if (!is_dir($tags)) {
+			mkdir($tags, 0755, true);
+		}
+
+		while ($pg <= $max) {
+			fwrite(STDERR, "Reading $base$tags/$pg\n");
+			$response = file_get_contents("$base$tags/$pg");
+			$xml = new SimpleXMLElement($response);
+
+			// Check for a next link
+			foreach ($xml->xpath('channel/atom:link') as $link) {
+				foreach ($link->attributes() as $attr=>$val) {
+					if ($attr == 'rel' && $val == 'next') {
+						$max ++;
+					}
+				}
+			}
+
+			// No more images found
+			if (!$xml->xpath('channel/item/media:content')) {
+				return;
+			}
+
+			// Echo image URLs
+			foreach ($xml->xpath('channel/item/media:content') as $item) {
+				foreach ($item->attributes() as $attr=>$val) {
+					if ($attr == 'url') {
+						echo "{$val}\n";
+					}
+				}
+			}
+
+			$pg ++;
+			usleep(5e5); // 0.5s
+		}
+
+		break;
+	default:
+		echo "Usage: {$me} <provider> <search>\n";
+		echo "Supported providers: rule34.paheal.net\n";
+}
+
