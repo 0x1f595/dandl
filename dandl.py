@@ -4,6 +4,7 @@ import configparser
 import argparse
 from urllib import parse, request
 import xml.etree.ElementTree as ET
+import json
 import time
 from sys import stderr
 
@@ -19,13 +20,16 @@ config = configparser.ConfigParser()
 if os.path.isfile(config_file):
     config.read(config_file)
 
+supported_sites = ['danbooru.donmai.us', 'safebooru.org', 'rule34.paheal.net']
+
 # Read arguments
 parser = argparse.ArgumentParser(
     description='Bulk download images from a Danbooru/Gelbooru/Shimmie site',
-    epilog='supported providers: safebooru.org rule34.paheal.net')
+    epilog='supported providers: ' + ' '.join(supported_sites))
 parser.add_argument('--dir', help='Directory to save images to')
 parser.add_argument('--limit', type=int, help='Max number of images to download')
-parser.add_argument('--nd', action='store_true', help='Skip downloading images')
+parser.add_argument('--nd', action='store_true',
+    help='Skip downloading images, only displaying URLs')
 parser.add_argument('provider', help='Provider to download from')
 parser.add_argument('tag', nargs='+', help='Tags to search for')
 args = parser.parse_args()
@@ -40,9 +44,24 @@ else:
     dir = os.curdir
 
 """
+Add images from a Danbooru JSON response
+"""
+def addDanbooruPosts(response, url):
+    for entry in response:
+        if not 'file_url' in entry:
+            return
+        file_url = entry['file_url']
+        file_url = parse.urljoin(url, file_url)
+        images.append({
+            'id': entry['id'],
+            'url': file_url,
+            'name': parse.unquote(file_url.split('/')[-1])
+        })
+
+"""
 Add images from a Gelbooru XML feed
 """
-def addGelPosts(posts, url):
+def addGelbooruPosts(posts, url):
     for post in root.findall('post'):
         file_url = parse.urljoin(url, post.get('file_url'))
         images.append({
@@ -66,7 +85,33 @@ def addShimmiePosts(channel, url, ns):
 
 # Find images by provider
 images = []
-if args.provider == 'safebooru.org' or args.provider == 'safebooru':
+
+if args.provider == 'danbooru.donmai.us' or args.provider == 'danbooru':
+    print_err('Searching for images...')
+    url = 'https://danbooru.donmai.us/post/index.json?tags='
+    query = parse.quote_plus(' '.join(args.tag), [])
+    headers = {'User-Agent': 'dandl/1.0'} # Danbooru blocks non-UA'd reqs
+    req = request.Request(url + query,None, headers)
+    res = request.urlopen(req)
+    root = json.loads(res.read().decode("utf-8"))
+
+    limit = args.limit
+    if not(limit) and config['DEFAULT'].get('limit'):
+        limit = int(config['DEFAULT'].get('limit'))
+    if not(limit):
+        limit = 1e7
+    pg = 1
+    while len(images) < limit:
+        addDanbooruPosts(root, url)
+        pg += 1
+        req = request.Request(url + query + '&page=' + str(pg), None, headers)
+        res = request.urlopen(req)
+        root = json.loads(res.read().decode("utf-8"))
+        if not len(root):
+            break
+        time.sleep(0.5)
+
+elif args.provider == 'safebooru.org' or args.provider == 'safebooru':
     print_err('Searching for images...')
     url = 'https://safebooru.org/index.php?page=dapi&s=post&q=index&'
     query = parse.quote_plus(' '.join(args.tag), [])
@@ -74,12 +119,12 @@ if args.provider == 'safebooru.org' or args.provider == 'safebooru':
     root = ET.fromstring(req.read())
 
     limit = args.limit
-    if not(limit):
+    if not(limit) and config['DEFAULT'].get('limit'):
         limit = int(config['DEFAULT'].get('limit'))
     if not(limit):
         limit = root.get('count')
     while len(images) < limit:
-        addGelPosts(root, url)
+        addGelbooruPosts(root, url)
         req = request.urlopen(url + query + '&offset=' + str(len(images)))
         root = ET.fromstring(req.read())
         time.sleep(0.5)
@@ -95,7 +140,7 @@ elif args.provider == 'rule34.paheal.net' or args.provider == 'r34':
     root = ET.fromstring(req.read())
 
     limit = args.limit
-    if not(limit):
+    if not(limit) and config['DEFAULT'].get('limit'):
         limit = int(config['DEFAULT'].get('limit'))
     if not(limit):
         limit = 1e7
