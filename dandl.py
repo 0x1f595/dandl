@@ -20,7 +20,8 @@ config = configparser.ConfigParser()
 if os.path.isfile(config_file):
     config.read(config_file)
 
-supported_sites = ['danbooru.donmai.us', 'safebooru.org', 'rule34.paheal.net']
+supported_sites = ['danbooru.donmai.us', 'safebooru.org', 'rule34.paheal.net',
+                   'shimmie.katawa-shoujo.com']
 
 # Read arguments
 parser = argparse.ArgumentParser(
@@ -47,6 +48,7 @@ else:
 Add images from a Danbooru JSON response
 """
 def addDanbooruPosts(response, url):
+    count = 0
     for entry in response:
         if not 'file_url' in entry:
             return
@@ -57,11 +59,14 @@ def addDanbooruPosts(response, url):
             'url': file_url,
             'name': parse.unquote(file_url.split('/')[-1])
         })
+        count = count + 1
+    return count
 
 """
 Add images from a Gelbooru XML feed
 """
 def addGelbooruPosts(posts, url):
+    count = 0
     for post in root.findall('post'):
         file_url = parse.urljoin(url, post.get('file_url'))
         images.append({
@@ -69,11 +74,14 @@ def addGelbooruPosts(posts, url):
             'url': file_url,
             'name': parse.unquote(file_url.split('/')[-1])
         })
+        count = count + 1
+    return count
 
 """
 Add images from a Shimmie RSS 2.0 feed
 """
 def addShimmiePosts(channel, url, ns):
+    count = 0
     for image in channel.findall('item'):
         file_url = image.find('media:content', ns).get('url')
         file_url = parse.urljoin(url, file_url)
@@ -82,6 +90,8 @@ def addShimmiePosts(channel, url, ns):
             'url': file_url,
             'name': parse.unquote(file_url.split('/')[-1])
         })
+        count = count + 1
+    return count
 
 # Find images by provider
 images = []
@@ -102,7 +112,9 @@ if args.provider == 'danbooru.donmai.us' or args.provider == 'danbooru':
         limit = 1e7
     pg = 1
     while len(images) < limit:
-        addDanbooruPosts(root, url)
+        count = addDanbooruPosts(root, url)
+        if not(count):
+            break
         pg += 1
         req = request.Request(url + query + '&page=' + str(pg), None, headers)
         res = request.urlopen(req)
@@ -124,7 +136,9 @@ elif args.provider == 'safebooru.org' or args.provider == 'safebooru':
     if not(limit):
         limit = root.get('count')
     while len(images) < limit:
-        addGelbooruPosts(root, url)
+        count = addGelbooruPosts(root, url)
+        if not(count):
+            break
         req = request.urlopen(url + query + '&offset=' + str(len(images)))
         root = ET.fromstring(req.read())
         time.sleep(0.5)
@@ -148,7 +162,41 @@ elif args.provider == 'rule34.paheal.net' or args.provider == 'r34':
     while len(images) < limit:
         next = None
         channel = root.find('channel')
-        addShimmiePosts(channel, url, ns)
+        count = addShimmiePosts(channel, url, ns)
+        if not(count):
+            break
+        for link in channel.findall('atom:link', ns):
+            if link.get('rel') == 'next':
+                next = parse.urljoin(url, link.get('href'))
+                time.sleep(0.5)
+                req = request.urlopen(next)
+                root = ET.fromstring(req.read())
+                break
+        if not(next):
+            break
+
+elif args.provider == 'shimmie.katawa-shoujo.com' or args.provider == 'ks':
+    print_err('Searching for images...')
+    ns = {'media': 'http://search.yahoo.com/mrss/',
+          'atom': 'http://www.w3.org/2005/Atom'}
+
+    url = 'https://shimmie.katawa-shoujo.com/rss/images/'
+    tags = parse.quote(' '.join(args.tag), [])
+    req = request.urlopen(url + tags + '/1')
+    root = ET.fromstring(req.read())
+
+    limit = args.limit
+    if not(limit) and config['DEFAULT'].get('limit'):
+        limit = int(config['DEFAULT'].get('limit'))
+    if not(limit):
+        limit = 1e7
+
+    while len(images) < limit:
+        next = None
+        channel = root.find('channel')
+        count = addShimmiePosts(channel, url, ns)
+        if not(count):
+            break
         for link in channel.findall('atom:link', ns):
             if link.get('rel') == 'next':
                 next = parse.urljoin(url, link.get('href'))
