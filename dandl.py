@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 import json
 import time
 from sys import stderr
+import textwrap
 
 """
 Print a string to stderr
@@ -22,6 +23,7 @@ if os.path.isfile(config_file):
 
 supported_sites = ['danbooru.donmai.us', 'safebooru.org', 'rule34.paheal.net',
                    'shimmie.katawa-shoujo.com']
+max_filename_len = 240
 
 # Read arguments
 parser = argparse.ArgumentParser(
@@ -216,7 +218,11 @@ for image in images:
     print(image['url'])
     if args.nd == False:
         ireq = request.urlopen(image['url'])
-        filename = dir.rstrip(os.sep) + os.sep + image['name']
+        basename = image['name']
+        if len(basename) > max_filename_len:
+            fn, ext = os.path.splitext(basename)
+            basename = textwrap.shorten(basename, width=max_filename_len, placeholder=ext)
+        filename = dir.rstrip(os.sep) + os.sep + basename
         if not(os.path.isfile(filename)):
             with open(filename, 'xb') as f:
                 f.write(ireq.read())
