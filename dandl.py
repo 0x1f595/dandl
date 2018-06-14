@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import os
 from appdirs import user_config_dir
 import configparser
